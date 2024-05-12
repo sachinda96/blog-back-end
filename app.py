@@ -1,6 +1,7 @@
 import sqlite3
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import hashlib
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -33,6 +34,7 @@ def users():
         return jsonify(users)
     elif request.method == 'POST':
         data = request.json
+        print(data)
         try:
             execute_query("INSERT INTO User (email, username, password, firstname, lastname, isActive) VALUES (?, ?, ?, ?, ?, ?)", (data['email'], data['username'], data['password'], data['firstname'], data['lastname'], data['isActive']))
             return jsonify({'message': 'User created successfully'}), 201
@@ -40,9 +42,9 @@ def users():
             return jsonify({'error': 'User already exists'}), 400
     elif request.method == 'PUT':
         data = request.json
-        user_id = data.get('userId')
+        user_id = data.get('id')
         if not user_id:
-            return jsonify({'error': 'Missing userId in request'}), 400
+            return jsonify({'error': 'Missing id in request'}), 400
         try:
             execute_query("UPDATE User SET email=?, username=?, password=?, firstname=?, lastname=?, isActive=? WHERE userId=?", (data['email'], data['username'], data['password'], data['firstname'], data['lastname'], data['isActive'], user_id))
             return jsonify({'message': f'User with ID {user_id} updated successfully'}), 200
@@ -50,14 +52,21 @@ def users():
             return jsonify({'error': f'Update failed for User with ID {user_id}'}), 400
 
 
-@app.route('/users/<int:user_id>', methods=['GET'])
+@app.route('/users/<int:user_id>', methods=['GET','DELETE'])
 def user(user_id):
-    user = execute_query("SELECT * FROM User WHERE userId=?", (user_id,), fetchone=True)
-    if user:
-        return jsonify(user)
-    else:
-        return jsonify({'error': 'User not found'}), 404
-
+    if request.method == 'GET':
+        user = execute_query("SELECT * FROM User WHERE userId=?", (user_id,), fetchone=True)
+        if user:
+            return jsonify(user)
+        else:
+            return jsonify({'error': 'User not found'}), 404
+    elif request.method == 'DELETE':
+        try:
+            execute_query("DELETE FROM User WHERE userid=?", (user_id,))
+            return jsonify({'message': f'User with ID {user_id} deleted successfully'}), 200
+        except sqlite3.IntegrityError:
+            return jsonify({'error': f'Delete failed for User with ID {user_id}'}), 400
+ 
 # Blogs
 @app.route('/blogs', methods=['GET', 'POST', 'PUT'])
 def blogs():
@@ -165,7 +174,7 @@ def categories():
             return jsonify({'error': 'Category creation failed'}), 400
     elif request.method == 'PUT':
         data = request.json
-        category_id = data.get('categoryId')
+        category_id = data.get('id')
         if not category_id:
             return jsonify({'error': 'Missing categoryId in request'}), 400
         try:
@@ -178,6 +187,7 @@ def categories():
 @app.route('/categories/<int:category_id>', methods=['GET', 'PUT', 'DELETE'])
 def category(category_id):
     if request.method == 'GET':
+       
         category = execute_query("SELECT * FROM Category WHERE categoryId=?", (category_id,), fetchone=True)
         if category:
             return jsonify(category)
@@ -199,7 +209,15 @@ def category(category_id):
         
 @app.route('/blogs/category/<int:category_id>', methods=['GET'])
 def blogs_by_category(category_id):
-    blogs = execute_query("SELECT * FROM Blog WHERE categoryId=?", (category_id,))
+    
+    query = """
+    SELECT b.*, c.name, u.firstName, u.lastName
+    FROM Blog AS b
+    INNER JOIN Category AS c ON b.categoryId = c.categoryId
+    INNER JOIN User AS u ON b.userId = u.userId WHERE b.categoryId=?
+    """    
+
+    blogs = execute_query(query, (category_id,))
     return jsonify(blogs)
 
 @app.route('/comments/blog/<int:blog_id>', methods=['GET'])
@@ -244,6 +262,45 @@ def blogs_by_paginate(page_number, per_page):
     blogs = execute_query(query, (per_page, offset))
 
     return jsonify(blogs)
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.json
+
+    required_fields = ['email', 'username', 'password', 'firstName', 'lastName']
+    if not all(field in data for field in required_fields):
+        return jsonify({"error": "Missing required fields"}), 400
+
+    hashed_password = hashlib.sha256(data['password'].encode()).hexdigest()
+
+    try:
+        execute_query("INSERT INTO User (email, username, password, firstname, lastname) VALUES (?, ?, ?, ?, ?)", 
+                      (data['email'], data['username'], hashed_password, data['firstName'], data['lastName']))
+        return jsonify({"message": "User registered successfully"}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/login', methods=['POST'])
+def login():
+    login_data = request.json
+
+    if 'username' not in login_data or 'password' not in login_data:
+        return jsonify({"error": "Username and password are required"}), 400
+
+    user = execute_query("SELECT email, username, password, firstname, lastname, userid FROM User WHERE username=?", (login_data['username'],))
+
+    if user:
+
+        user = user[0]
+
+        stored_password = user[2]  
+        input_password_hash = hashlib.sha256(login_data['password'].encode()).hexdigest()
+        if stored_password == input_password_hash:
+            return jsonify(user), 200
+        else:
+            return jsonify({"error": "Invalid username or password"}), 401
+    else:
+        return jsonify({"error": "Invalid username or password"}), 401
 
 if __name__ == '__main__':
     app.run(debug=True)
