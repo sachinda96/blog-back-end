@@ -64,6 +64,9 @@ This is a RESTful API built with Flask for managing blog posts, users, comments,
 
 ## Database
 
+![bloger](https://github.com/sachinda96/blog-back-end/assets/33303027/1bb248f4-4bc2-41d4-93ee-940fe8d13a99)
+
+
 This application uses SQLite as the database backend. The database file (`blog-database.db`) will be created automatically when the application is run for the first time.
 
 ## Authors
